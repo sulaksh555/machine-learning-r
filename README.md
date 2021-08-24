@@ -1,2 +1,3 @@
-# r-inbuilt-datasets-machine-learning
-End-to-end treatments of datasets built into R
+# machine-learning-r
+
+My machine learning projects carried out in R
