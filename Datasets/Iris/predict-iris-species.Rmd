@@ -1,0 +1,278 @@
+---
+title: "predict-iris-species"
+author: "Sulaksh Swami"
+date: "August 17, 2021"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      comment = NA)
+```
+
+## Synopsis
+
+This predictive modeling project aims to build a machine learning model to predict the species of iris based on 4 numeric features. The data comes from the iris dataset built into R.
+
+## Setup
+
+Import the libraries needed for the project.
+
+```{r}
+library(e1071)
+library(naniar)
+library(ggplot2)
+library(GGally)
+library(tidyr)
+library(corrplot)
+library(caret)
+```
+
+## Load the Data
+
+Load the data.
+
+```{r}
+data(iris)
+```
+
+Store the data in a data frame.
+
+```{r}
+df <- iris
+```
+
+## Describe the Data
+
+Look at the head and tail of the data.
+
+```{r}
+head(df)
+```
+
+```{r}
+tail(df)
+```
+
+Look at the dimensions of the data.
+
+```{r}
+dim(df)
+```
+
+The dataset appears to have 150 rows and 5 columns.
+
+Look at the data types of each variable in the data.
+
+```{r}
+sapply(df, class)
+```
+
+Obtain descriptive statistics for the data.
+
+```{r}
+summary(df)
+```
+
+Obtain the standard deviations of the numeric variables. All variables are numeric here.
+
+```{r}
+X <- df[, colnames(df) != "Species"]
+
+sapply(X, sd)
+```
+
+Obtain the distribution of instances across different class labels.
+
+```{r}
+y <- df$Species
+
+cbind(frequency = table(y),
+      percentage = prop.table(table(y))*100)
+```
+
+Obtain the correlations between the numeric variables.
+
+```{r}
+cor(X)
+```
+
+Obtain the skew of each numeric variable in the data.
+
+```{r}
+sapply(X, skewness)
+```
+
+Use the Shapiro-Wilk test to check if the numeric variables in the data are Gaussian.
+
+```{r}
+# Use a significance level of 0.05
+
+p.values <- as.numeric(sapply(X, shapiro.test)["p.value", ])
+is.gaussian <- (p.values >= 0.05)
+
+check.gaussian <- data.frame(p.values = p.values,
+                             is.gaussian = is.gaussian)
+rownames(check.gaussian) <- colnames(X)
+
+check.gaussian
+```
+
+The output indicates that only Sepal.Width is Gaussian at a 0.05 significance level. Keeping this in mind, I pick the XGBoost algorithm for modeling the problem, since this algorithm doesn't assume that its features are Gaussian.
+
+## Visualize the Data
+
+### Univariate Plots
+
+Make a missing value plot to diagnose the presence of missing values in the data.
+
+```{r}
+vis_miss(df)
+```
+
+The plot's output indicates that no variable has missing values. Hence, no imputation will have to be carried out during preprocessing.
+
+Make a histogram for each numeric variable.
+
+```{r}
+ggplot(data = gather(X)) +
+        geom_histogram(mapping = aes(x = value),
+                       fill = "cornflowerblue") +
+        facet_wrap(~key,
+                   scales = "free_x")
+```
+
+Make a density plot for each variable.
+
+```{r}
+ggplot(data = gather(X)) +
+        geom_density(mapping = aes(x = value),
+                     color = "mediumpurple",
+                     fill = "mediumpurple") +
+        facet_wrap(~key,
+                   scales = "free_x")
+```
+
+Make a boxplot for each variable.
+
+```{r}
+ggplot(data = gather(X)) +
+        geom_boxplot(mapping = aes(y = value),
+                     fill = "skyblue") +
+        facet_wrap(~key,
+                   scales = "free_y")
+```
+
+### Multivariate Plots
+
+Make a correlation matrix plot to visualize the correlation between the numeric variables in the data.
+
+```{r}
+correlations <- cor(X)
+
+corrplot(correlations, 
+         method = "circle")
+```
+
+Make a scatter plot matrix for the data frame.
+
+```{r}
+ggpairs(data = df,
+        aes(color = Species))
+```
+
+## Data Partitioning
+
+Data partitioning of the data frame into the features and the target variable has already been done. 
+
+```{r}
+str(X)
+```
+
+```{r}
+str(y)
+```
+
+## Preprocessing
+
+All variables are numeric. The data needs to be scaled to a mean of 0 and a standard deviation of 1. Preprocessing will be carried out during training.
+
+## Tune the Model Parameters
+
+Make a grid of candidate parameters.
+
+```{r}
+tune.grid <- expand.grid(nrounds = 100,
+                         eta = c(0.02, 0.04, 0.06, 0.08, 0.1),
+                         subsample = c(0.5, 0.75, 1),
+                         colsample_bytree = c(0.4, 0.6, 0.8, 1),
+                         max_depth = c(4, 6, 8, 10),
+                         min_child_weight = 0,
+                         gamma = 0)
+```
+
+Set up cross-validation.
+
+```{r}
+train.control <- trainControl(method = "cv",
+                              number = 5)
+```
+
+Train the model using the grid search harness.
+
+```{r}
+model <- train(x = X, 
+               y = y,
+               method = "xgbTree",
+               preProcess = c("center", "scale"),
+               metric = "Accuracy",
+               maximize = TRUE,
+               trControl = train.control,
+               tuneGrid = tune.grid)
+```
+
+```{r}
+model
+```
+
+```{r}
+ggplot(data = model)
+```
+
+```{r}
+print("The best parameters obtained from the grid search are:")
+print(model$bestTune)
+```
+
+```{r}
+best.row <- rownames(model$bestTune)
+best.accuracy <- model$results[best.row, ]$Accuracy
+best.accuracy.standard.error <- model$results[best.row, ]$AccuracySD
+
+cat("The accuracy score obtained for the best parameters is", best.accuracy, "with a standard error of", best.accuracy.standard.error)
+```
+
+Store the final model as a fit object.
+
+```{r}
+final.model <- model$finalModel
+```
+
+## Save the Model
+
+Save the model to disk so that it may be conveniently loaded later, as and when it is required to make predictions on iris data.
+
+```{r}
+saveRDS(object = final.model,
+        file = "iris-model.rds")
+```
+
+```{r}
+dir()
+```
+
+
+
+
+
+
